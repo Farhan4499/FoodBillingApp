@@ -1,0 +1,192 @@
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
+from tkinter import messagebox
+import time
+import os
+import tempfile
+
+class ModernFoodBillingSystem:
+    def __init__(self, root):
+        self.root = root
+        self.root.geometry("1920x1080+0+0")
+        self.root.title("Modern Food Billing System")
+
+        # --- Updated Data ---
+        self.drinks_menu = {
+            "Sprite": 65, "Pepsi": 75, "DietCoke": 99, "Mojito": 120, "Cappuccino": 110,
+            "Fanta": 75,"CocaCola": 75, "ColdCoffee": 95, "Lemonade": 60, "Ice Tea": 90,
+            "Mango Shake": 160,"Water": 30, "Latte": 180, "Espresso": 140, "Mocha": 200,"Hot Chocolate": 150
+        }
+        self.food_menu = {
+            "Veg Burger": 115, "Pasta": 135, "Sandwich": 180,"French Fries": 99,"Pizza": 350,
+            "Spring Roll": 200,"Chicken Roll": 120, "Chicken Wings": 300, "Egg Roll": 160,
+            "Wrap": 160, "Chicken Burger": 155, "Noodles": 180, "Desert": 90, "Paneer Chilli": 250, "Honey Potato Chilli": 220
+        }
+
+        # --- Variables ---
+        self.item_entries, self.entry_widgets = {}, {}
+        self.vars = {
+            "d_cost": ttk.StringVar(), "f_cost": ttk.StringVar(), "service": ttk.StringVar(),
+            "sub": ttk.StringVar(), "tax": ttk.StringVar(), "total": ttk.StringVar()
+        }
+        self.discount_amt = 0.0 
+        self.calc_input = ttk.StringVar()
+        self.operator = ""
+
+        # --- UI Setup ---
+        self.setup_ui()
+        self.reset_system()
+
+    def change_theme(self, event):
+        self.root.style.theme_use(self.theme_combo.get())
+
+    def toggle_dark(self):
+        new_theme = 'flatly' if 'dark' in self.root.style.theme.type else 'cyborg'
+        self.root.style.theme_use(new_theme)
+        self.theme_combo.set(new_theme)
+
+    def setup_ui(self):
+        control_frame = ttk.Frame(self.root)
+        control_frame.pack(fill=X, padx=20, pady=5)
+        ttk.Label(control_frame, text=":   Select Theme").pack(side=RIGHT, padx=3)
+        self.theme_combo = ttk.Combobox(control_frame, values=self.root.style.theme_names(), state="readonly", width=15)
+        self.theme_combo.set(self.root.style.theme.name)
+        self.theme_combo.pack(side=RIGHT, padx=5)
+        self.theme_combo.bind("<<ComboboxSelected>>", self.change_theme)
+        ttk.Button(control_frame, text="Toggle Dark/Light", bootstyle="secondary-outline", command=self.toggle_dark).pack(side=LEFT)
+
+        ttk.Label(self.root, font=('Courier New', 40, 'bold'), text='Food Billing System', bootstyle="info").pack(pady=0)
+
+        btn_frame = ttk.Frame(self.root)
+        btn_frame.pack(side=BOTTOM, fill=X, padx=500, pady=30)
+        btns = [('Total', 'success', self.calc_totals), ('Receipt', 'info', self.generate_receipt), 
+                ('Print', 'primary', self.print_receipt), ('Reset', 'warning', self.reset_system), ('Exit', 'danger', self.root.destroy)]
+        for txt, style, cmd in btns:
+            ttk.Button(btn_frame, text=txt, bootstyle=style, command=cmd).pack(side=LEFT, expand=True, fill=X, padx=5)
+
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=BOTH, expand=True, padx=25, pady=0)
+        
+        self.d_frame = ttk.Frame(main_frame)
+        self.d_frame.grid(row=0, column=0, sticky=NSEW, padx=10)
+        
+        self.calc_frame = ttk.Frame(main_frame)
+        self.calc_frame.grid(row=0, column=1, sticky=NSEW, padx=5)
+        
+        self.totals_frame = ttk.Frame(main_frame)
+        self.totals_frame.grid(row=0, column=2, sticky=NSEW, padx=5)
+        
+        self.f_frame = ttk.Frame(main_frame)
+        self.f_frame.grid(row=0, column=3, sticky=NSEW, padx=10)
+
+        self.build_menu(self.d_frame, self.drinks_menu)
+        self.build_menu(self.f_frame, self.food_menu)
+        self.build_calc()
+        self.build_totals()
+        
+        self.txt_receipt = ttk.Text(self.totals_frame, height=20, font=('Courier', 8))
+        self.txt_receipt.pack(fill=BOTH, expand=True, pady=10)
+
+    def build_menu(self, parent, menu):
+        for i, name in enumerate(menu):
+            self.item_entries[name] = ttk.StringVar(value="0")
+            ttk.Label(parent, text=name, font=('Helvetica', 14)).grid(row=i, column=0, sticky=W, padx=25, pady=2)
+            entry = ttk.Entry(parent, width=4, font=('Helvetica', 14), textvariable=self.item_entries[name])
+            entry.grid(row=i, column=1, padx=30, pady=5)
+            self.entry_widgets[name] = entry
+
+    def build_calc(self):
+        ttk.Entry(self.calc_frame, textvariable=self.calc_input, justify=RIGHT, state="readonly", font=('Arial', 24)).pack(fill=X, pady=5)
+        buttons = [['7','8','9','+'], ['4','5','6','-'], ['1','2','3','*'], ['0','C','=','/'], ['Discount %', 'Penalty +']]
+        for row in buttons:
+            f = ttk.Frame(self.calc_frame)
+            f.pack(fill=X)
+            for char in row:
+                style = "info" if char in ['Discount %', 'Penalty +'] else "secondary"
+                ttk.Button(f, text=char, bootstyle=style, command=lambda c=char: self.calc_press(c)).pack(side=LEFT, expand=True, fill=X, padx=1, pady=1)
+
+    def build_totals(self):
+        for text, var in [('Drinks', self.vars['d_cost']), ('Food', self.vars['f_cost']), ('Sub', self.vars['sub']), 
+                          ('Service', self.vars['service']), ('Tax', self.vars['tax']), ('Total', self.vars['total'])]:
+            f = ttk.Frame(self.totals_frame)
+            f.pack(fill=X, pady=3)
+            ttk.Label(f, text=text, font=('Helvetica', 12, 'bold')).pack(side=LEFT)
+            ttk.Entry(f, textvariable=var, state="readonly", font=('Helvetica', 12), width=10).pack(side=RIGHT)
+
+    def calc_press(self, c):
+        if c == 'C': self.calc_input.set(""); self.operator = ""
+        elif c == '=':
+            try: self.operator = str(eval(self.operator)); self.calc_input.set(self.operator)
+            except: self.calc_input.set("Error")
+        elif c == 'Discount %':
+            try:
+                current = float(self.vars['total'].get().replace("Rs ", ""))
+                self.discount_amt = current * 0.10
+                self.vars['total'].set(f"Rs {current - self.discount_amt:.2f}")
+            except: messagebox.showerror("Error", "Calculate Total first!")
+        elif c == 'Penalty +':
+            try:
+                current = float(self.vars['total'].get().replace("Rs ", ""))
+                self.vars['total'].set(f"Rs {current + 50:.2f}")
+            except: messagebox.showerror("Error", "Calculate Total first!")
+        else: self.operator += c; self.calc_input.set(self.operator)
+
+    def calc_totals(self):
+        d = sum(float(self.item_entries[n].get() or 0) * self.drinks_menu[n] for n in self.drinks_menu)
+        f = sum(float(self.item_entries[n].get() or 0) * self.food_menu[n] for n in self.food_menu)
+        sub = d + f + 1.59
+        self.vars['d_cost'].set(f"Rs {d:.2f}"); self.vars['f_cost'].set(f"Rs {f:.2f}"); self.vars['sub'].set(f"Rs {sub:.2f}")
+        self.vars['service'].set("Rs 1.59"); self.vars['tax'].set(f"Rs {sub*0.15:.2f}"); self.vars['total'].set(f"Rs {sub*1.15:.2f}")
+        self.discount_amt = 0.0 
+
+    def generate_receipt(self):
+        self.txt_receipt.delete("1.0", END)
+        self.txt_receipt.insert(END, f"--- RECEIPT ---\n{time.strftime('%d/%m/%y')}\n" + "-"*40 + "\nItem\t\tQty\tAmount\n" + "-"*40 + "\n")
+        full = {**self.drinks_menu, **self.food_menu}
+        for n in full:
+            qty_str = self.item_entries[n].get()
+            if qty_str and int(qty_str) > 0:
+                qty = int(qty_str)
+                self.txt_receipt.insert(END, f"{n:<15} {qty}\tRs {qty*full[n]:.2f}\n")
+        
+        self.txt_receipt.insert(END, "-"*40 + f"\nDrinks: {self.vars['d_cost'].get()}\nFood: {self.vars['f_cost'].get()}\nService: {self.vars['service'].get()}\nSub: {self.vars['sub'].get()}\nTax: {self.vars['tax'].get()}\n")
+        if self.discount_amt > 0: 
+            self.txt_receipt.insert(END, f"Discount: -Rs {self.discount_amt:.2f}\n")
+        self.txt_receipt.insert(END, "-"*40 + f"\nTotal: {self.vars['total'].get()}\n*************** THANKS ***************")
+
+    def print_receipt(self):
+        receipt_text = self.txt_receipt.get("1.0", END).strip()
+        if not receipt_text:
+            messagebox.showwarning("Warning", "Receipt is empty!")
+            return
+
+        try:
+            if os.name == 'nt':
+                # Windows: Pipe directly to the printer using 'print' command
+                # Note: This sends to the default system printer
+                import subprocess
+                process = subprocess.Popen(['print'], stdin=subprocess.PIPE, shell=True)
+                process.communicate(input=receipt_text.encode('utf-8'))
+            else:
+                # Linux/macOS: Pipe directly to lpr
+                import subprocess
+                process = subprocess.Popen(['lpr'], stdin=subprocess.PIPE)
+                process.communicate(input=receipt_text.encode('utf-8'))
+            
+            messagebox.showinfo("Success", "Receipt sent to printer.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Printing failed: {e}")
+
+
+    def reset_system(self):
+        self.discount_amt = 0.0
+        self.operator = ""
+        self.calc_input.set("")
+        for v in self.vars.values(): v.set("")
+        for n in self.item_entries: self.item_entries[n].set("0")
+        self.txt_receipt.delete("1.0", END)
+        self.root.update_idletasks()
+
+if __name__ == "__main__":
+    app = ModernFoodBillingSystem(ttk.Window(themename="cyborg"))
+    app.root.mainloop()
